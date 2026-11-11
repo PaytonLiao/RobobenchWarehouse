@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RobobenchWarehouse</title>
+<meta name="description" content="A simulation benchmark for vision-language-action and world action models on warehouse picking: one interface for any model, fixed tasks and seeds, randomised SKUs and scenes, two robot tracks, a zero-shot → fine-tune → evaluate protocol, and a plain-English reason for every failure.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: one column of full-width bands; steel neutrals, signal-blue accent, safety-amber marks (warehouse floor tape). */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --surface-2:#e9edf1; --ink:#12171d; --ink-2:#3f4954; --muted:#6a7581;
+  --line:#d6dde4; --accent:#1d5fbf; --accent-ink:#ffffff; --accent-soft:#e1ebf8; --ok:#23784a; --ok-soft:#dcefe3;
+  --bad:#b0362a; --bad-soft:#f6dedb; --warn:#8a6100; --bar:#1d5fbf; --bar-soft:#d8e4f4; --code:#151b22; --code-ink:#e4e9ee;
+  --tape:#e8a800;
+  --shadow:0 1px 2px rgba(18,23,29,.05),0 6px 20px rgba(18,23,29,.06);
+  --display:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1318; --surface:#161c23; --surface-2:#1e262f; --ink:#e7ecf1; --ink-2:#b9c3cd; --muted:#8994a0;
+  --line:#2a333d; --accent:#6aa5f2; --accent-ink:#0b1420; --accent-soft:#17263a; --ok:#5cc28a; --ok-soft:#173226;
+  --bad:#ee7d6c; --bad-soft:#3a1f1b; --warn:#e2b44a; --bar:#6aa5f2; --bar-soft:#1c2c40; --code:#0a0e12; --code-ink:#e4e9ee;
+  --tape:#f0b72a; --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1318; --surface:#161c23; --surface-2:#1e262f; --ink:#e7ecf1; --ink-2:#b9c3cd; --muted:#8994a0;
+  --line:#2a333d; --accent:#6aa5f2; --accent-ink:#0b1420; --accent-soft:#17263a; --ok:#5cc28a; --ok-soft:#173226;
+  --bad:#ee7d6c; --bad-soft:#3a1f1b; --warn:#e2b44a; --bar:#6aa5f2; --bar-soft:#1c2c40; --code:#0a0e12; --code-ink:#e4e9ee;
+  --tape:#f0b72a; --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+code{font-size:.88em;background:var(--surface-2);padding:.1em .35em;border-radius:4px}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;gap:20px;height:56px}
+.brand{font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none;white-space:nowrap}
+.brand{font-family:var(--display);font-size:17px;display:flex;align-items:center;gap:10px}
+.brand::before{content:"";width:22px;height:12px;background:repeating-linear-gradient(-45deg,var(--tape) 0 5px,var(--ink) 5px 10px);border-radius:2px}
+.brand span{color:var(--accent)}
+nav.links{display:flex;gap:16px;overflow-x:auto;scrollbar-width:none;flex:1}
+nav.links a{color:var(--ink-2);text-decoration:none;font-size:14px;white-space:nowrap}
+nav.links a:hover{color:var(--ink)}
+.theme{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer}
+section{padding:64px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+.eyebrow{display:flex;align-items:center;gap:10px;font:500 12px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+.eyebrow::before{content:"";width:18px;height:3px;background:var(--tape);border-radius:1px}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(34px,5.2vw,56px);line-height:1.04;letter-spacing:-.02em;margin:0 0 16px;max-width:18ch;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:clamp(26px,3.2vw,34px);line-height:1.15;letter-spacing:-.01em;margin:0 0 12px;text-wrap:balance}
+h3{font-family:var(--display);font-weight:600;font-size:19px;margin:0 0 6px}
+.lede{font-size:18px;color:var(--ink-2);max-width:62ch;margin:0 0 24px}
+.sub{color:var(--ink-2);max-width:70ch;margin:0 0 28px}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:36px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);text-decoration:none;font-weight:500;font-size:15px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.hero{padding:56px 0 48px}
+.teaser{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.clip{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+.clip video,.clip img{width:100%;display:block;background:#000;aspect-ratio:8/3;object-fit:contain;cursor:zoom-in}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid2>*{min-width:0}
+dialog.zoom{border:0;padding:0;background:transparent;max-width:min(96vw,1400px);width:96vw}
+dialog.zoom::backdrop{background:rgba(0,0,0,.82)}
+dialog.zoom video,dialog.zoom img{width:100%;max-height:82vh;object-fit:contain;display:block;background:#000;border-radius:8px}
+dialog.zoom p{color:#e8e6df;margin:10px 2px 0;font-size:15px}
+dialog.zoom button{position:absolute;top:8px;right:8px;border:0;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+.st{font:500 12px/1.6 "IBM Plex Mono",monospace;padding:0 8px;border-radius:999px;white-space:nowrap}
+.st.built{background:var(--ok-soft);color:var(--ok)}
+.st.planned{background:var(--accent-soft);color:var(--warn)}
+.st.notyet{background:var(--surface-2);color:var(--muted)}
+.st.frozen{background:var(--bar-soft);color:var(--bar)}
+#cmp-table td{vertical-align:top}
+#cmp-table td:first-child{color:var(--muted);font-size:13px}
+.clip .cap{padding:10px 14px 12px;font-size:14px}
+.clip .cap b{display:block;font-size:14px;margin-bottom:2px}
+.chip{display:inline-block;font:500 12px/1.6 "IBM Plex Mono",monospace;padding:0 8px;border-radius:999px;margin-right:6px;vertical-align:1px}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.mode{background:var(--surface-2);color:var(--ink-2)}
+.why{color:var(--ink-2);margin:4px 0 0}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.stat .n{font-family:var(--display);font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1.05;color:var(--accent)}
+.stat .l{color:var(--muted);font-size:14px}
+pre{background:var(--code);color:var(--code-ink);border-radius:10px;padding:14px 64px 14px 16px;overflow-x:auto;max-width:100%;font-size:13.5px;line-height:1.55;margin:0;position:relative}
+pre .c{color:#8f948f}
+pre .k{color:#f0a36e}
+.copy{position:absolute;top:8px;right:8px;border:1px solid #3a3e45;background:#2b2f35;color:#d6d4cd;border-radius:6px;font:12px "IBM Plex Sans",sans-serif;padding:3px 8px;cursor:pointer}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.step .num{font:600 13px "IBM Plex Mono",monospace;color:var(--accent)}
+.flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:4px 0 8px;margin-bottom:22px}
+.node{flex:1 0 140px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 12px;font-size:14px;cursor:pointer;text-align:left;font-family:inherit;color:var(--ink)}
+.node .t{font-weight:600;display:block}
+.node .d{color:var(--muted);font-size:12.5px}
+.node[aria-selected="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.arrow{flex:0 0 22px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.panel{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.panel>*,.steps>*,.step>*,.grid3>*,.grid4>*,.teaser>*,.robots>*{min-width:0}
+.panel p{margin:0 0 10px;color:var(--ink-2)}
+.tbl{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14.5px}
+.tbl th,.tbl td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.tbl th{font-weight:600;color:var(--muted);font-size:13px;background:var(--surface-2)}
+.tbl tr:last-child td{border-bottom:0}
+.tbl td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.rate{display:flex;align-items:center;gap:8px;min-width:150px}
+.rate .bar{flex:1;height:8px;background:var(--bar-soft);border-radius:4px;position:relative;overflow:hidden;min-width:60px}
+.rate .bar span{position:absolute;inset:0 auto 0 0;background:var(--bar);border-radius:4px}
+.rate .v{font-variant-numeric:tabular-nums;width:44px;text-align:right}
+.note{font-size:13.5px;color:var(--muted);margin-top:10px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.filters button{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);padding:5px 12px;border-radius:999px;font:inherit;font-size:14px;cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.still{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.still img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover}
+.still div{padding:8px 10px;font-size:13.5px}
+.still div b{display:block;font-size:13.5px}
+.task{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.task + .task{margin-top:10px}
+.task .s{font:500 12px "IBM Plex Mono",monospace;color:var(--muted)}
+.robots{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.robot{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.robot .views{display:grid;grid-template-columns:2fr 1fr 1fr;gap:2px;background:var(--line)}
+.robot .views img{width:100%;height:100%;object-fit:cover;display:block;aspect-ratio:1}
+.robot .views img:first-child{aspect-ratio:auto}
+.robot .body{padding:14px 16px}
+.robot dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:8px 0 0;font-size:14px}
+.robot dt{color:var(--muted)}
+.robot dd{margin:0}
+.callout{background:var(--accent-soft);border-radius:12px;padding:16px 18px;color:var(--ink)}
+.callout b{color:var(--ink)}
+.suites{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+.suite{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);min-width:0}
+.suite video{width:100%;max-width:100%;display:block;background:#000;aspect-ratio:8/3;object-fit:contain}
+.suite .sb{padding:16px 18px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.suite .sh{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.suite .rows{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.trow{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:9px 0;border-bottom:1px solid var(--line);min-width:0}
+.trow .why{grid-column:1/-1;margin:0;font-size:14px}.rchips{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.conds{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.conds .l,.rhead .l{display:block;font:500 11px/1.4 "IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.conds .l{width:100%}
+figure.wide video{aspect-ratio:1284/626}
+.report{margin-top:22px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px;min-width:0}
+.rtop{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:start}
+.rhead{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;font-size:14.5px}.rhead .wide{grid-column:1/-1}
+.rbig{display:flex;gap:14px;align-items:center;background:var(--ok-soft);border-radius:10px;padding:14px 18px}
+.rbig .n{font-family:var(--display);font-size:40px;font-weight:700;color:var(--ok);line-height:1}
+.rh{margin:8px 0 0}
+.funnel td{min-width:92px}.fbar{height:8px;background:var(--bar-soft);border-radius:4px;overflow:hidden;margin-bottom:3px}.fbar span{display:block;height:100%;background:var(--bar)}
+.funnel .v{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media (max-width:860px){.suites,.rtop,.rhead{grid-template-columns:1fr}}
+footer{padding:28px 0 56px;color:var(--muted);font-size:14px;border-top:1px solid var(--line);background:var(--surface)}
+.foot{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:baseline}.foot>span:last-child{flex:1 1 420px;min-width:0}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.tag-planned{font:500 11px "IBM Plex Mono",monospace;color:var(--warn);border:1px solid currentColor;border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:2px}
+@media (max-width:860px){
+  .teaser,.panel,.robots{grid-template-columns:1fr}
+  .steps,.grid3,.grid2{grid-template-columns:1fr}
+  .stats,.grid4{grid-template-columns:1fr 1fr}
+  nav.links{display:none}
+  section{padding:48px 0}
+  .tbl{display:block;overflow-x:auto}
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="#top">Robobench<span>Warehouse</span></a>
+  <nav class="links">
+    <a href="#start">Quick start</a><a href="#tasks">Suites</a><a href="#robots">Robots</a><a href="#variation">Scenes</a><a href="#models">Your model</a>
+    <a href="#pipeline">Protocol</a><a href="#report">Report</a><a href="#outcomes">Episodes</a><a href="#baselines">Results</a><a href="#compare">Design</a>
+  </nav>
+  <button class="theme" id="theme" type="button" aria-label="Toggle colour theme">Theme</button>
+</div></header>
+
+<main id="top">
+<section class="hero"><div class="wrap">
+  <p class="eyebrow">Benchmark for VLAs and world action models</p>
+  <h1>Warehouse picking, evaluated the same way every time.</h1>
+  <p class="lede">A simulation benchmark for robot foundation models on warehouse picking. Run your vision-language-action model or world action model as a server. The benchmark runs the tasks, robots and randomised scenes, and returns success rates with confidence intervals and a plain-English reason for every failed episode.</p>
+  <div class="btns">
+    <a class="btn primary" href="#start">Quick start</a>
+    <a class="btn" href="#models">Bring your model</a>
+    <a class="btn" href="https://github.com/REIVeela/warehouse-logistics-benchmark">Code</a>
+  </div>
+  <div class="teaser">
+    <figure class="clip" style="margin:0">
+      <video src="media/lora-success-d1.mp4" autoplay muted loop playsinline></video>
+      <figcaption class="cap"><b><span class="chip ok">success</span>Example episode · BinTransfer, D1</b>
+      <span class="why">Grasped at step 54, placed and settled by step 136.</span></figcaption>
+    </figure>
+    <figure class="clip" style="margin:0">
+      <video src="media/lora-nearmiss-d2.mp4" autoplay muted loop playsinline></video>
+      <figcaption class="cap"><b><span class="chip bad">never_grasped</span>Example episode · BinTransfer, D2</b>
+      <span class="why">Near miss: the gripper got no closer than 0.06 m (step 59; it started 0.42 m away), but the grasp never closed on the target.</span></figcaption>
+    </figure>
+  </div>
+  <div class="stats" style="margin-top:28px">
+    <div class="stat"><div class="n">1</div><div class="l">interface for every model: a websocket server and a model card, VLA or world action model</div></div>
+    <div class="stat"><div class="n">2</div><div class="l">robot tracks: Fetch mobile manipulator (joint actions) and Panda (standard end-effector actions)</div></div>
+    <div class="stat"><div class="n">60</div><div class="l">frozen test episodes per task: 3 difficulty levels × 20 fixed seeds, run once per model</div></div>
+    <div class="stat"><div class="n">6</div><div class="l">variation axes drawn from the seed: SKU class, mass, friction, distractors, lighting, shelf</div></div>
+  </div>
+</div></section>
+
+<section id="start"><div class="wrap">
+  <p class="eyebrow">Quick start</p>
+  <h2>Three commands from model to report</h2>
+  <p class="sub">Your model runs as a websocket server in its own environment (the openpi protocol). The benchmark runs the simulator, sends observations, executes the returned actions and records everything.</p>
+  <p class="note">In the commands below, <code>python</code> is the simulator environment's Python 3.10, set up once with <code>bash scripts/payton/setup_sim_env.sh</code>. On the lab machines: type <code>bash</code>, then <code>source scripts/payton/wlb_env.sh</code>, and use <code>$WLB_SIM_ENV/bin/python</code>.</p>
+  <div class="steps">
+    <div class="step"><span class="num">01 · See what's there</span>
+<pre><button class="copy">copy</button>python -m pipeline.cli list</pre>
+      <span class="why">Suites (themed task sets), model cards, tasks and fine-tuning recipes.</span></div>
+    <div class="step"><span class="num">02 · Evaluate (all tasks by default)</span>
+<pre><button class="copy">copy</button>python -m pipeline.cli evaluate \
+  --suite warehouse-prototype-v1 \
+  --model rbm_pi05</pre>
+      <span class="why">Start the model's server first (the card's <code>serve</code> line says how). The robot comes from the model card. Add <code>--tasks A,B</code> to choose tasks and <code>--dry-run</code> to see the plan first. <code>--model scripted_oracle</code> needs no server.</span></div>
+    <div class="step"><span class="num">03 · Read the result</span>
+<pre><button class="copy">copy</button>open &lt;eval dir&gt;/evaluation.md      <span class="c"># printed by evaluate</span>
+open &lt;run dir&gt;/report.html</pre>
+      <span class="why">Success per condition with 95% intervals, how far episodes got, and a reason and video per episode.</span></div>
+  </div>
+  <p class="note">Evaluating your own model takes a server and a model card: see <a href="#models">Bring your model</a>.</p>
+</div></section>
+
+<section id="tasks"><div class="wrap">
+  <p class="eyebrow">What is measured</p>
+  <h2>Two suites, each a theme of tasks</h2>
+  <p class="sub">A suite is a themed set of tasks, as in LIBERO and RoboCasa. It names no robot: each task lists one protocol per robot it supports, and the robot comes from your model card. Tasks your robot cannot run are skipped and listed in the report, and results for different robots are never pooled. <code>evaluate</code> runs every benchmark task unless you pass <code>--tasks</code>; draft tasks run with <code>--include-drafts</code>.</p>
+  <div class="suites" id="suite-list"></div>
+  <div class="panel" style="margin-top:28px">
+    <div>
+      <h3 style="margin-bottom:10px">BinTransfer-v0 difficulty levels</h3>
+      <table class="tbl">
+        <thead><tr><th>Level</th><th>What changes</th></tr></thead>
+        <tbody>
+          <tr><td><b>D0</b></td><td>training-like placement</td></tr>
+          <tr><td><b>D1</b></td><td>wider object and bin pose jitter, robot start noise</td></tr>
+          <tr><td><b>D2</b></td><td>D1 plus obstacles</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+<pre><button class="copy">copy</button><span class="c"># configs/pipeline/tasks/BinTransfer-v0.yaml (excerpt)</span>
+<span class="k">success</span>:
+  source: env.evaluate()
+  <span class="k">predicates</span>:
+    all:
+      - inside: {object: target, container: target_container}
+      - in_workspace: {object: target}
+      - not_grasped: {object: target}
+      - held_for:
+          steps: 10
+          all:
+            - inside: {object: target, container: target_container}
+            - still: {object: target, linear: 0.01, angular: 0.1}</pre>
+      <p class="note">The item must be inside the target bin, released, and still for 10 steps. <code>python -m pipeline.cli check-success &lt;run&gt;</code> replays the rule on recorded episodes and compares it with the environment's flag: 381/381 agree for BinTransfer-v0.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="robots"><div class="wrap">
+  <p class="eyebrow">Robot tracks</p>
+  <h2>A robot is a profile, not code</h2>
+  <p class="sub">A profile lists the action and state layout, cameras, control rate, joint limits and end effector. It is checked line by line against the live simulator. Pick the track whose action space matches your model; fine-tuning covers the rest.</p>
+  <div class="robots">
+    <div class="robot">
+      <div class="views"><img src="media/robot-fetch.jpg" alt="Fetch at the workstation"><img src="media/robot-fetch-head.jpg" alt="Fetch head camera view"><img src="media/robot-fetch-wrist.jpg" alt="Fetch wrist camera view"></div>
+      <div class="body"><h3>Fetch · <code>fetch_rbm-pd_joint_pos-v1</code></h3>
+        <dl><dt>Robot</dt><dd>Mobile manipulator (RoboBenchMart's Fetch)</dd>
+        <dt>Cameras</dt><dd>2 head 256² + wrist 128²</dd>
+        <dt>Actions</dt><dd>13-D joint targets, 20 Hz</dd>
+        <dt>Gripper</dt><dd>parallel, opens ~0.10 m</dd>
+        <dt>Suites</dt><dd>prototype and industrial (primary robot)</dd>
+        <dt>For</dt><dd>models trained on Fetch data (RoboBenchMart π0 / π0.5 / Octo), or any model fine-tuned on its demos</dd></dl></div>
+    </div>
+    <div class="robot">
+      <div class="views"><img src="media/robot-panda.jpg" alt="Panda at the workstation"><img src="media/robot-panda-front.jpg" alt="Panda front camera view"><img src="media/robot-panda-wrist.jpg" alt="Panda wrist camera view"></div>
+      <div class="body"><h3>Panda · <code>panda_cam-pd_ee_delta_pose-v1</code></h3>
+        <dl><dt>Robot</dt><dd>Franka Panda arm at the same workstation</dd>
+        <dt>Cameras</dt><dd>front 256² + wrist 128²</dd>
+        <dt>Actions</dt><dd>7-D end-effector deltas (<code>eef7-v1</code>), 20 Hz</dd>
+        <dt>Gripper</dt><dd>parallel, opens ~0.08 m</dd>
+        <dt>Suites</dt><dd>prototype (BinTransfer)</dd>
+        <dt>For</dt><dd>end-effector VLAs and world action models trained on LIBERO, DROID or Open X-Embodiment-style data</dd></dl></div>
+    </div>
+  </div>
+  <p class="note"><b>Adding a robot</b> takes seven checked steps: the simulator builds the task with it, a profile, a contract test against the live simulator, a binding in each task card, one protocol per task with its own seeds, a scripted oracle that solves the task on it, and an entry in the suite. A frozen result never transfers to a new robot.</p>
+  <p class="note">The profile's end effector also sets how outcomes are worded (a gripper "grasps", a suction cup "attaches"). <code>evaluate --dry-run</code> warns before running when an item is wider than the gripper opens.</p>
+</div></section>
+
+<section id="variation"><div class="wrap">
+  <p class="eyebrow">Randomise SKUs and scenes, reproducibly</p>
+  <h2>A condition is a variation file</h2>
+  <p class="sub">Each axis is a constant, a choice or a range. Every episode draws its scene from its seed and saves it as <code>scene.json</code>, so the same seed always gives the same scene and episodes replay exactly. Item classes come from catalogues, including the four size classes of the industrial warehouse. The industrial suite lists its variation conditions per task: some run today, the rest are marked planned until its environment can build them.</p>
+  <div class="grid4" id="var-stills"></div>
+  <div class="panel" style="margin-top:20px">
+<pre><button class="copy">copy</button><span class="c"># configs/pipeline/variations/sku-clutter-v1.yaml</span>
+variation_id: sku-clutter-v1
+base: D0
+<span class="k">axes</span>:
+  sku: {catalogue: bintransfer-proxy-v1, classes: all,
+        mass_kg: {low: 0.05, high: 0.30}}
+  distractors: {count: {low: 2, high: 4}, classes: all}
+
+<span class="c"># configs/pipeline/variations/lighting-v1.yaml</span>
+variation_id: lighting-v1
+base: D0
+<span class="k">axes</span>:
+  lighting: {intensity: {low: 0.4, high: 1.6},
+             color_temperature_k: {low: 3000, high: 7500},
+             ambient: {low: 0.5, high: 1.5}}</pre>
+    <table class="tbl">
+      <thead><tr><th>Axis</th><th>Keys</th></tr></thead>
+      <tbody>
+        <tr><td>sku</td><td>catalogue class, mass, friction, size scale</td></tr>
+        <tr><td>distractors</td><td>count, classes (never the target's), spacing</td></tr>
+        <tr><td>placement</td><td>object and bin position / yaw jitter</td></tr>
+        <tr><td>lighting</td><td>intensity, colour temperature, ambient</td></tr>
+        <tr><td>shelf</td><td>pick level, level heights, depth, bay and aisle width <span class="tag-planned">industrial suite</span></td></tr>
+        <tr><td>camera</td><td>field of view <span class="tag-planned">planned</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div></section>
+
+<section id="models"><div class="wrap">
+  <p class="eyebrow">Bring your model</p>
+  <h2>A server and a model card, for any kind of model</h2>
+  <p class="sub">Used as a policy, every model is the same function: observations in, a chunk of actions out. Your model runs as a websocket server in its own environment, so the benchmark never imports its code or dependencies. A model card says which robot track it uses, how to talk to it and whether it is zero-shot or fine-tuned.</p>
+  <div class="grid2">
+    <div>
+      <table class="tbl">
+        <thead><tr><th>Your server receives</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><code>observation/images/&lt;camera&gt;</code></td><td>every camera of the robot, uint8</td></tr>
+          <tr><td><code>observation/history/&lt;camera&gt;</code></td><td>the last <i>k</i> frames, when the card sets <code>history: k</code></td></tr>
+          <tr><td><code>observation/state</code></td><td>joint and gripper state</td></tr>
+          <tr><td><code>prompt</code></td><td>the task instruction</td></tr>
+          <tr><td><code>action_layout</code>, <code>embodiment</code></td><td>what to reply in, which robot</td></tr>
+        </tbody>
+      </table>
+      <table class="tbl" style="margin-top:12px">
+        <thead><tr><th>It replies with</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><code>actions</code></td><td>(N, D) chunk in that layout; <code>eef7-v1</code> = Δposition, Δrotation, gripper, converted per robot</td></tr>
+          <tr><td><code>predicted_frames</code></td><td>optional: a world action model's imagined frames, saved with each chunk</td></tr>
+        </tbody>
+      </table>
+      <p class="note">On connecting, the server must say which checkpoint it serves (repository and revision); the run refuses a server that cannot, or whose name differs from the card's <code>expected_model</code>.</p>
+    </div>
+    <div>
+<pre><button class="copy">copy</button><span class="c"># configs/pipeline/model_cards/my_eef_model.yaml</span>
+model_id: my_eef_model
+family: wam                  <span class="c"># vla | wam | other</span>
+embodiment: panda_cam-pd_ee_delta_pose-v1
+mode: zero_shot              <span class="c"># or finetuned (+ training:)</span>
+<span class="k">policy</span>:
+  kind: websocket
+  adapter: generic
+  adapter_options: {history: 4, output_layout: eef7-v1}
+  host: 127.0.0.1
+  port: 8000
+  expected_model: my-eef-model</pre>
+<pre style="margin-top:12px"><button class="copy">copy</button>cp scripts/payton/servers/generic_model_server_template.py my_server.py
+python my_server.py --port 8000          <span class="c"># in your model's env</span>
+python -m pipeline.cli evaluate --suite warehouse-prototype-v1 \
+  --model configs/pipeline/model_cards/my_eef_model.yaml</pre>
+    </div>
+  </div>
+  <table class="tbl" style="margin-top:20px">
+    <thead><tr><th>Model type</th><th>How it connects</th><th>Run through it so far</th></tr></thead>
+    <tbody>
+      <tr><td><b>VLA</b></td><td><code>openpi_fetch13</code> adapter (the openpi request format RoboBenchMart's models use) or <code>generic</code>; joint actions on Fetch, <code>eef7-v1</code> on Panda</td><td>RoboBenchMart π0, π0.5 and Octo; π0.5 + LoRA</td></tr>
+      <tr><td><b>World action model</b></td><td><code>generic</code> adapter with a frame history; optional predicted frames saved next to the real camera frames</td><td>Cosmos Policy (NVIDIA), UWM (UW / TRI), zero-shot and fine-tuned</td></tr>
+      <tr><td><b>Scripted oracle</b></td><td>in-process, reads true object poses; labelled <code>privileged</code></td><td>shows each task is solvable; generates fine-tuning demos</td></tr>
+    </tbody>
+  </table>
+  <div class="grid2" style="margin-top:20px;align-items:start">
+    <div>
+      <h3>How much of each chunk runs</h3>
+      <p class="why">Models return a chunk of actions; the protocol's <code>execution: {replan_every}</code> decides how many run before the model is asked again: the whole chunk, or the first <i>N</i> steps. The Panda track has both: by default a run executes the protocol's setting, and <code>--replan-every 8</code> runs 8 steps at a time (UWM's own setting). Results always state which.</p>
+      <h3 style="margin-top:18px">World action models</h3>
+      <p class="why">There is no standard protocol for world action models yet: LIBERO, RoboCasa and RoboTwin 2.0 evaluate them as policies, and so does this benchmark, with the same tasks, seeds and success rule as VLAs. What they add, a frame history in and predicted frames out, is handled by the adapter and kept as evidence; it never changes the score.</p>
+    </div>
+    <figure class="clip" style="margin:0"><img src="media/uwm_ft_predicted_frames.png" alt="A world action model's predicted front and wrist frames, saved with the episode" style="aspect-ratio:auto;max-height:420px;object-fit:contain">
+      <figcaption class="cap"><b><span class="chip mode">predicted_frames</span>Saved with every chunk</b><span class="why">A fine-tuned UWM's imagined front and wrist views 16 steps ahead, stored beside the episode's real frames.</span></figcaption></figure>
+  </div>
+</div></section>
+
+<section id="pipeline"><div class="wrap">
+  <p class="eyebrow">Evaluation protocol</p>
+  <h2>Zero-shot → fine-tune → evaluate again</h2>
+  <p class="sub">Every model is first evaluated as released. To adapt it, the benchmark provides the demonstrations and a named recipe, like RoboTwin's fixed "train on clean demos, test Easy/Hard", so fine-tuned results from different models are comparable. Seeds are split by purpose: train 30000+, dev 0–4 per level for choosing checkpoints, and frozen test 10000–10019, run once per model. Click a step to see its command and what you can change.</p>
+  <div class="flow" role="tablist" aria-label="Pipeline steps" id="flow"></div>
+  <div class="panel" id="flow-panel"></div>
+</div></section>
+
+<section id="report"><div class="wrap">
+  <p class="eyebrow">The evaluation report</p>
+  <h2>What one evaluation gives you</h2>
+  <p class="sub">Every episode runs to a verdict from the environment's own success check. The report adds 95% intervals, a progress funnel per condition, failure labels and timing, and links a video and a one-sentence reason for every episode. Below: the 60 frozen test episodes of π0.5 + LoRA on BinTransfer-v0, recorded in one run.</p>
+  <figure class="clip wide" style="margin:0"><video src="media/verdict-grid-lora-test.mp4" autoplay muted loop playsinline controls></video>
+    <figcaption class="cap"><b>60 episodes, one run</b><span class="why">Rows are D0, D1 and D2 (20 seeds each). Each tile turns green or red the moment its episode ends, labelled with its outcome; the tally counts up to 46 successes.</span></figcaption></figure>
+  <div class="report" id="report-card"></div>
+</div></section>
+
+<section id="outcomes"><div class="wrap">
+  <p class="eyebrow">Reading the results</p>
+  <h2>Every episode says what happened</h2>
+  <p class="sub">Beyond success, each episode gets a progress funnel (reached → grasped → lifted → in target → released → settled), a failure label and one sentence derived from the recorded trajectory, with the step and distance that show it. The same text is in each run's <code>report.html</code> and <code>summary.csv</code>, with a <code>review.csv</code> for adding your own label. Click a clip to enlarge it.</p>
+  <div class="filters" role="group" aria-label="Filter episodes" id="ep-filters"></div>
+  <div class="grid2" id="ep-grid"></div>
+  <h3 style="margin-top:32px">One set of rules, adapted to each task and each robot</h3>
+  <p class="sub">Labels and stages come from three layers, so a new task or robot adds data to a card rather than code, and results stay comparable across tasks.</p>
+  <table class="tbl">
+    <thead><tr><th>Layer</th><th>What it decides</th><th>Where it lives</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><b>Core</b></td><td>The six funnel stages and the shared failure labels</td><td><code>pipeline/metrics/taxonomy.py</code></td><td><span class="chip bad">never_grasped</span> <span class="chip bad">grasp_lost</span> <span class="chip bad">placed_not_settled</span></td></tr>
+      <tr><td><b>Task</b></td><td>Extra stages and labels for this task, written as conditions over the recorded episode, with a sentence template</td><td>task card <code>diagnostics:</code></td><td>order picking: <span class="chip mode">lifted 4 cm while held</span> <span class="chip bad">held_not_lifted</span> <span class="chip bad">wrong_item_picked</span></td></tr>
+      <tr><td><b>Robot</b></td><td>What holding an item is called and how outcomes are worded</td><td>robot profile <code>end_effector</code></td><td>gripper "grasped", suction cup "attached to"</td></tr>
+    </tbody>
+  </table>
+  <div class="grid2" style="margin-top:16px">
+    <div>
+<pre><button class="copy">copy</button><span class="c"># configs/pipeline/tasks/OrderPicking-v0.yaml (excerpt)</span>
+<span class="k">diagnostics</span>:
+  stages:
+    - name: lifted_while_held
+      when: {ever: {flag: target_lift_observed}}
+  labels:
+    - name: wrong_item_picked
+      when: {ever: {flag: wrong_object_interaction_observed}}
+      explain: "Picked a distractor (step {step}) ..."
+    - name: held_not_lifted
+      when: {all: [{ever: {grasped: true}},
+                   {not: {ever: {flag: target_lift_observed}}}]}
+      explain: "The {tool} {held} the target but never
+                lifted it 4 cm ..."</pre>
+      <p class="note">Task labels are tried before the core ones; missing evidence counts as unknown, never as false. Conditions: <code>flag</code>, <code>grasped</code>, <code>in_target</code>, <code>near</code>, <code>lifted</code>, <code>all</code>, <code>any</code>, <code>not</code>, <code>ever</code>.</p>
+    </div>
+    <div>
+      <p class="note" style="margin-top:0"><b>Same episode, two robots' words.</b> The measurement is identical; only the robot layer changes.</p>
+      <div class="callout" style="margin-bottom:10px"><span class="chip bad">never grasped</span> <b>Gripper</b><br>Near miss: the gripper got no closer than 0.07 m (step 48; it started 0.45 m away), but the grasp never closed on the target.</div>
+      <div class="callout"><span class="chip bad">never attached</span> <b>Suction cup</b><br>Near miss: the suction cup got no closer than 0.07 m (step 48; it started 0.45 m away), but the cup never sealed on the target.</div>
+      <p class="note">Suction physics is not in the simulator yet; this shows the wording a suction robot's profile produces.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="baselines"><div class="wrap">
+  <p class="eyebrow">Reference results · BinTransfer-v0</p>
+  <h2>Results</h2>
+  <p class="sub">Reference runs that show what the numbers look like, not a leaderboard. Success is the strict flag, over all episodes, with Wilson 95% intervals. Dev = seeds 0–4 per level; test = the frozen 60 episodes. Fine-tuned rows name their recipe.</p>
+  <div style="overflow-x:auto">
+  <table class="tbl" id="results-table">
+    <thead><tr><th>Track</th><th>Model</th><th>Mode</th><th>Split</th><th>Overall</th><th>D0</th><th>D1</th><th>D2</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+  <p class="note">Released models fail zero-shot on both tracks; on Fetch, the standard fine-tune (π0.5 + LoRA, <code>standard-ft-v1</code>) solves 46/60 test episodes. On Panda, fine-tuned UWM reaches the object in 9/15 dev episodes but does not complete the task. The oracle reads true object poses; it shows the task is solvable and is not a policy result.</p>
+
+  <p class="eyebrow" style="margin-top:48px">Reference results · IndustrialShelfRetrieval-v0</p>
+  <h3>Retrieval from a narrow-aisle rack</h3>
+  <p class="sub">Retrieve a family-B carton from the middle shelf of the right-hand rack and place it in the order tote, within 2,400 steps. An episode ends at the first fatal collision, or as soon as the item leaves the shelf without being held. Dev seeds 301–303 are used for checkpoint selection; test seeds 701–702 are run once with the selected checkpoint. Out-of-range actions end the episode; clipping them instead gives the same results.</p>
+  <div style="overflow-x:auto">
+  <table class="tbl" id="industrial-table">
+    <thead><tr><th>Model</th><th>Mode</th><th>Split</th><th>Success</th><th>Closest gripper–item</th><th>How episodes ended</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+  <p class="note">The gripper starts about 1.15 m from the item. Zero-shot, no RoboBenchMart model gets closer than 0.92 m, even with out-of-range actions clipped instead of rejected. Fine-tuned on five scripted demonstrations (recipe <code>industrial-ft-v0</code>, train seeds 501–505, each replayed exactly before export), π0.5 + LoRA learns the approach: every episode brings the gripper within 0.12 m by step 120–150, shortly before the scripted oracle grasps (step 159), and then collides or nudges the item off the shelf. With five near-identical demonstrations, this fine-tune is expected to overfit. The final checkpoint and the test run are pending.</p>
+</div></section>
+
+<section id="compare"><div class="wrap">
+  <p class="eyebrow">Design and roadmap</p>
+  <h2>What is built, and what inspired it</h2>
+  <p class="sub">Each row is one part of the benchmark: whether it is built yet, and where the idea comes from (an established benchmark, the industrial warehouse scenario, or new to this benchmark). Filter by status.</p>
+  <div class="filters" role="group" aria-label="Filter by status" id="cmp-filters"></div>
+  <div style="overflow-x:auto">
+  <table class="tbl" id="cmp-table">
+    <thead><tr><th>Area</th><th>Specification</th><th>Status</th><th>Inspiration</th><th>What this benchmark adds</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+  <p class="note">Sources: <a href="https://arxiv.org/abs/2306.03310">LIBERO</a> · <a href="https://arxiv.org/abs/2510.13626">LIBERO-Plus</a> · <a href="https://arxiv.org/abs/2412.18194">VLABench</a> · <a href="https://arxiv.org/abs/2506.18088">RoboTwin 2.0</a> · <a href="https://arxiv.org/abs/2603.04356">RoboCasa365</a> · <a href="https://arxiv.org/abs/2603.01229">RMBench</a> · <a href="https://github.com/emb-ai/RoboBenchMart">RoboBenchMart</a> · <a href="https://arxiv.org/abs/2601.16163">Cosmos Policy</a> · <a href="https://arxiv.org/abs/2504.02792">UWM</a> · industrial scenario document.</p>
+</div></section>
+</main>
+<dialog class="zoom" id="zoom"><button type="button" id="zoom-close">close</button><div id="zoom-body"></div><p id="zoom-cap"></p></dialog>
+
+<footer><div class="wrap">
+  <div class="foot"><span class="brand" style="font-size:15px">Robobench<span>Warehouse</span></span><span>Simulator: ManiSkill 3 / SAPIEN, with the RoboBenchMart Fetch robot. Released checkpoints: RoboBenchMart (π0, π0.5, Octo), NVIDIA (Cosmos Policy), UW / TRI (UWM). Every number and video on this page comes from a recorded run.</span></div>
+</div></footer>
+
+<script>
+const RESULTS = [
+  {tr:"Fetch", m:"Scripted oracle", mode:"privileged", split:"dev (2 seeds)", all:[6,6], d:[[2,2],[2,2],[2,2]]},
+  {tr:"Fetch", m:"π0.5 + LoRA (standard-ft-v1)", mode:"fine-tuned", split:"test", all:[46,60], d:[[19,20],[13,20],[14,20]], best:true},
+  {tr:"Fetch", m:"RoboBenchMart Octo", mode:"zero-shot", split:"test", all:[0,60], d:[[0,20],[0,20],[0,20]]},
+  {tr:"Fetch", m:"RoboBenchMart π0.5", mode:"zero-shot", split:"dev", all:[0,15], d:[[0,5],[0,5],[0,5]]},
+  {tr:"Panda", m:"UWM (uwm-ft-panda-v1)", mode:"fine-tuned", split:"dev", all:[0,15], d:[[0,5],[0,5],[0,5]]},
+  {tr:"Panda", m:"UWM, LIBERO-90 release", mode:"zero-shot", split:"dev", all:[0,15], d:[[0,5],[0,5],[0,5]]},
+  {tr:"Panda", m:"Cosmos Policy, LIBERO 2B", mode:"zero-shot", split:"dev", all:[0,15], d:[[0,5],[0,5],[0,5]]},
+];
+function wilson(k,n){if(!n)return[0,0];const z=1.959964,p=k/n,d=1+z*z/n,c=(p+z*z/(2*n))/d,h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;return[Math.max(0,c-h),Math.min(1,c+h)];}
+function rateCell(k,n,ci){const r=k/n,[lo,hi]=wilson(k,n);return `<div class="rate" title="${k}/${n}, 95% CI ${Math.round(lo*100)}–${Math.round(hi*100)}%"><div class="bar"><span style="width:${(r*100).toFixed(1)}%"></span></div><span class="v">${k}/${n}</span></div>${ci?`<div class="note" style="margin:2px 0 0">95% CI ${Math.round(lo*100)}–${Math.round(hi*100)}%</div>`:""}`;}
+const INDUSTRIAL = [
+  {m:"Scripted oracle", mode:"privileged", split:"dev", k:3, n:3, near:"grasps at step 159", end:"all succeed (1,128 steps)"},
+  {m:"π0.5 + LoRA (industrial-ft-v0), steps 1000–4000", mode:"fine-tuned", split:"dev", k:0, n:3, near:"0.12 m", end:"collision, or item knocked off the shelf, at step 68–403", best:true},
+  {m:"RoboBenchMart π0", mode:"zero-shot", split:"dev", k:0, n:3, near:"stopped first", end:"gripper command 0.001 past its limit, step 4–5"},
+  {m:"RoboBenchMart π0.5", mode:"zero-shot", split:"dev", k:0, n:3, near:"stopped first", end:"gripper command past its limit, step 33–49"},
+  {m:"RoboBenchMart Octo", mode:"zero-shot", split:"dev", k:0, n:3, near:"stopped first", end:"gripper command past its limit, step 144–244"},
+];
+document.querySelector("#industrial-table tbody").innerHTML = INDUSTRIAL.map(r=>`<tr${r.best?' style="background:var(--accent-soft)"':''}><td>${r.m}</td><td><span class="chip ${r.mode==="zero-shot"?"bad":r.mode==="fine-tuned"?"ok":"mode"}">${r.mode}</span></td><td>${r.split}</td><td class="num">${rateCell(r.k,r.n,false)}</td><td>${r.near}</td><td>${r.end}</td></tr>`).join("");
+document.querySelector("#results-table tbody").innerHTML = RESULTS.map(r=>`<tr${r.best?' style="background:var(--accent-soft)"':''}><td>${r.tr}</td><td>${r.m}</td><td><span class="chip ${r.mode==="zero-shot"?"bad":r.mode==="fine-tuned"?"ok":"mode"}">${r.mode}</span></td><td>${r.split}</td><td class="num">${rateCell(r.all[0],r.all[1],true)}</td>${r.d.map(([k,n])=>`<td class="num">${rateCell(k,n,false)}</td>`).join("")}</tr>`).join("");
+
+const EPISODES = [
+  {v:"lora-success-d1",ok:true,label:"success",t:"π0.5 + LoRA · BinTransfer D1 · seed 10001",why:"Succeeded: grasped at step 54, placed and settled by step 136."},
+  {v:"lora-nearmiss-d2",ok:false,label:"never_grasped",t:"π0.5 + LoRA · D2 · seed 10009",why:"Near miss: the gripper got no closer than 0.06 m (step 59; it started 0.42 m away), but the grasp never closed on the target."},
+  {v:"lora-timeout-d1",ok:false,label:"timeout",t:"π0.5 + LoRA · D1 · seed 10002",why:"Ran out of time (200 steps): grasped at step 54 but never lifted it; the target ended still in the source container."},
+  {v:"rbm-pi05-zeroshot-d0",ok:false,label:"never_grasped",t:"RoboBenchMart π0.5, zero-shot · D0 · seed 0",why:"Never grasped the target: the gripper got no closer than 0.34 m (step 157; it started 0.44 m away)."},
+  {v:"oracle-d0",ok:true,label:"success",t:"Scripted oracle · D0 · seed 0",why:"Succeeded: grasped at step 52, placed and settled by step 134."},
+  {v:"varied-clutter",ok:true,label:"success",t:"Oracle · SKU clutter · seed 0",why:"“Move the blue package …” among four distractors. Succeeded: grasped at step 51, settled by step 134."},
+  {v:"varied-lighting",ok:true,label:"success",t:"Oracle · lighting variation · seed 1",why:"Succeeded: grasped at step 52, placed and settled by step 135."},
+  {v:"industrial-expert-demo",ok:true,label:"success",t:"Scripted oracle · IndustrialShelfRetrieval-v0 · train seed 501 (2× speed)",why:"A fine-tuning demonstration, replayed exactly before export. Grasped at step 159, placed in the order tote and settled by step 1,128. Head cameras and wrist camera."},
+  {v:"industrial-ft-s2000-knocked",ok:false,label:"never_grasped",t:"π0.5 + LoRA, step 2000 · IndustrialShelfRetrieval-v0 · dev seed 302",why:"Closed in to 0.12 m of the item, then nudged it off the shelf without holding it. The episode ended at step 150."},
+];
+const filters = [["all","All"],["success","Successes"],["failure","Failures"],["never_grasped","never_grasped"],["timeout","timeout"]];
+const fEl = document.getElementById("ep-filters"), gEl = document.getElementById("ep-grid");
+fEl.innerHTML = filters.map(([k,l],i)=>`<button type="button" data-f="${k}" aria-pressed="${i===0}">${l}</button>`).join("");
+gEl.innerHTML = EPISODES.map(e=>`<figure class="clip" style="margin:0" data-ok="${e.ok}" data-label="${e.label}"><video src="media/${e.v}.mp4" muted loop playsinline controls preload="metadata"></video><figcaption class="cap"><b><span class="chip ${e.ok?"ok":"bad"}">${e.label}</span>${e.t}</b><span class="why">${e.why}</span></figcaption></figure>`).join("");
+fEl.addEventListener("click", ev=>{const b=ev.target.closest("button");if(!b)return;
+  fEl.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed", x===b));
+  const f=b.dataset.f;gEl.querySelectorAll(".clip").forEach(c=>{const show=f==="all"||(f==="success"&&c.dataset.ok==="true")||(f==="failure"&&c.dataset.ok==="false")||c.dataset.label===f;c.style.display=show?"":"none";});});
+
+const FETCH = "Fetch", PANDA = "Panda";
+const SUITES = [
+  {id:"warehouse-prototype-v1", name:"Prototype suite", video:"oracle-d0", robots:[FETCH, PANDA],
+   about:"Workstation tasks used to build and test the pipeline, the baselines and the fine-tuning loop.",
+   tasks:[["BinTransfer-v0",[[FETCH,"benchmark"],[PANDA,"draft"]],"Move one item from the source bin to the target bin; frozen D0–D2 test seeds."],
+          ["BinTransferVaried-v0",[[FETCH,"draft"]],"BinTransfer with item class, mass, friction, distractors and lighting drawn per seed."],
+          ["BinTransferLong-v0",[[FETCH,"draft"]],"BinTransfer with a 600-step limit: does a model fail only for lack of time?"],
+          ["OrderPicking-v0",[[FETCH,"draft"]],"Pick the target item from storage into the order tote, from basic to cluttered."],
+          ["PickSKU-v0",[[FETCH,"draft"]],"Pick a named SKU among distractors; defines the SKU task interface."]],
+   cmd:"python -m pipeline.cli evaluate --suite warehouse-prototype-v1 \\\n  --model rbm_pi05 --include-drafts"},
+  {id:"warehouse-industrial-v1", name:"Industrial suite", video:"industrial-expert-demo", robots:[FETCH],
+   about:"The warehouse tasks from the industrial scenario: narrow aisles, real rack layout, strict success.",
+   tasks:[["IndustrialShelfRetrieval-v0",[[FETCH,"draft"]],"Retrieve a family-B carton from the middle shelf of a narrow-aisle rack into the order tote, within 2,400 steps."]],
+   conditions:[["nominal","run"],["robot start within 5 cm","planned"],["shelf level","planned"],["bay along the aisle","planned"],["item family A–D","planned"],["neighbour spacing 5–20 mm","planned"],["lighting","planned"]],
+   cmd:"python -m pipeline.cli evaluate --suite warehouse-industrial-v1 \\\n  --model rbm_pi05 --include-drafts"},
+];
+document.getElementById("suite-list").innerHTML = SUITES.map(su=>`<article class="suite">
+  <video src="media/${su.video}.mp4" autoplay muted loop playsinline></video>
+  <div class="sb"><div class="sh"><h3>${su.name}</h3><code>${su.id}</code></div>
+  <p class="why" style="margin:0">${su.about}</p>
+  <div class="rows">${su.tasks.map(([id,rs,d])=>`<div class="trow"><b class="mono">${id}</b><span class="rchips">${rs.map(([rb,st])=>`<span class="st ${st==="benchmark"?"built":"notyet"}">${rb} · ${st}</span>`).join("")}</span><span class="why">${d}</span></div>`).join("")}</div>
+  ${su.conditions?`<div class="conds"><span class="l">Conditions</span>${su.conditions.map(([c,st])=>`<span class="st ${st==="run"?"built":"planned"}">${c}${st==="planned"?" · planned":""}</span>`).join("")}</div>`:""}
+  <pre><button class="copy">copy</button>${su.cmd}</pre></div></article>`).join("");
+
+const REPORT = {model:"π0.5 + LoRA (standard-ft-v1)", mode:"fine-tuned", suite:"warehouse-prototype-v1", task:"BinTransfer-v0", robot:"fetch_rbm-pd_joint_pos-v1", split:"test (frozen seeds 10000–10019, run once)", data:"300 scripted demonstrations, train seeds; checked disjoint from every evaluated seed",
+  conds:[{c:"D0",k:19,n:20,len:136.1,fail:[["never_grasped",1]],funnel:[.95,.95,.95,.95,.95,.95]},
+         {c:"D1",k:13,n:20,len:135.7,fail:[["never_grasped",5],["timeout",2]],funnel:[.75,.75,.65,.65,.75,.65]},
+         {c:"D2",k:14,n:20,len:136.6,fail:[["never_grasped",6]],funnel:[.70,.70,.70,.70,.70,.70]}],
+  stages:["reached","grasped","lifted","in target","released","settled"], infer:"414 ms per chunk (median)"};
+(function(){const R=REPORT,K=R.conds.reduce((a,c)=>a+c.k,0),N=R.conds.reduce((a,c)=>a+c.n,0),[lo,hi]=wilson(K,N);
+ const head=`<div class="rhead"><div><span class="l">Model</span>${R.model} <span class="chip ok">${R.mode}</span></div><div><span class="l">Suite · task</span><code>${R.suite}</code> · ${R.task}</div><div><span class="l">Robot</span><code>${R.robot}</code></div><div><span class="l">Split</span>${R.split}</div><div class="wide"><span class="l">Training data</span>${R.data}</div></div>`;
+ const big=`<div class="rbig"><div class="n">${K}/${N}</div><div><b>${Math.round(100*K/N)}% success</b><br><span class="why">Wilson 95% CI ${Math.round(lo*100)}–${Math.round(hi*100)}%</span></div></div>`;
+ const rowsS=R.conds.map(c=>`<tr><td><b>${c.c}</b></td><td class="num">${rateCell(c.k,c.n,true)}</td><td class="num">${c.len}</td><td>${c.fail.map(([l,v])=>`<span class="chip bad">${l} ${v}</span>`).join(" ")}</td></tr>`).join("");
+ const succ=`<table class="tbl"><thead><tr><th>Condition</th><th>Success</th><th>Steps (successes, mean)</th><th>Failure labels</th></tr></thead><tbody>${rowsS}</tbody></table>`;
+ const fun=`<table class="tbl funnel"><thead><tr><th>Condition</th>${R.stages.map(x=>`<th>${x}</th>`).join("")}</tr></thead><tbody>${R.conds.map(c=>`<tr><td><b>${c.c}</b></td>${c.funnel.map(v=>`<td><div class="fbar"><span style="width:${v*100}%"></span></div><span class="v">${Math.round(v*100)}%</span></td>`).join("")}</tr>`).join("")}</tbody></table>`;
+ document.getElementById("report-card").innerHTML=`<div class="rtop">${head}${big}</div><h3 class="rh">Success by condition</h3>${succ}<h3 class="rh">Progress funnel</h3><p class="note" style="margin-top:0">Share of episodes that reached each stage. A task can add its own stages, such as lifted off the shelf or cleared the rack.</p><div style="overflow-x:auto">${fun}</div><p class="note">Inference ${R.infer}. Every run also writes <code>report.html</code> with a video, a failure label and a one-sentence reason for each episode, as in the examples below.</p>`;})();
+
+const STILLS = [["var-nominal","Nominal","D0 scene, default item"],["var-sku-mix","SKU mix","class, mass, friction per seed"],["var-sku-clutter","Clutter","2–4 distractors of other classes"],["var-lighting","Lighting","dim/bright, warm/cool"],
+];
+document.getElementById("var-stills").innerHTML = STILLS.map(([f,t,d])=>`<div class="still"><img src="media/${f}.jpg" alt="${t}" loading="lazy"><div><b>${t}</b>${d}</div></div>`).join("");
+
+const FLOW = [
+  {t:"Zero-shot", d:"released weights", cmd:"python -m pipeline.cli evaluate \\\n  --suite warehouse-prototype-v1 --model rbm_pi05", what:"Evaluate the model as released. The model card's <code>mode: zero_shot</code> labels every run.", knobs:["<code>--tasks</code>: which tasks (default all)","<code>--split dev|test</code>: test needs <code>--allow-test</code>, once per model","model card: server address, adapter, robot track"]},
+  {t:"Collect demos", d:"oracle, train seeds", cmd:"python -m pipeline.cli finetune-data \\\n  --suite warehouse-prototype-v1 --recipe standard-ft-v1 \\\n  --robot fetch_rbm-pd_joint_pos-v1 --out exports/ft --repo-id ft", what:"The scripted oracle (true object poses + IK) solves each task on <b>train</b> seeds 30000+, disjoint from dev and test by construction.", knobs:["or skip this step: a released dataset gives the same 300 demonstrations to everyone <span class=\"tag-planned\">planned</span>","recipe <code>demos_per_condition</code> (standard: 100)","which tasks: <code>--tasks</code>","demo policy (default <code>scripted_oracle</code>)"]},
+  {t:"Verify", d:"exact replay", cmd:"# part of finetune-data; or alone:\npython -m pipeline.cli demos verify <run>", what:"Every demonstration is replayed on a fresh environment and must reproduce bit for bit before it is exported.", knobs:["<code>--no-verify</code> to skip (not recommended)"]},
+  {t:"Export", d:"LeRobot or LIBERO", cmd:"# part of finetune-data; or alone:\npython -m pipeline.cli export lerobot <runs> --out DIR\npython -m pipeline.cli export libero-hdf5 <runs> --out DIR", what:"Cameras, state, actions and the instruction, in the format your training code reads: LeRobot (openpi) or LIBERO HDF5 (LIBERO-trained models such as UWM). A manifest lists every episode's task, condition and seed.", knobs:["format: <code>lerobot</code> or <code>libero-hdf5</code>","export config: field mapping (<code>configs/pipeline/exports/</code>)"]},
+  {t:"Fine-tune", d:"your training code", cmd:"# your model's own trainer, e.g.\npython scripts/payton/train/train_pi05_lora.py ...\n# recipes: standard-ft-v1, uwm-ft-panda-v1", what:"Training stays model-specific. A recipe fixes the data and reports the budget (steps, batch, GPU, wall time) with the result.", knobs:["recipe <code>training_budget</code>","checkpoint choice on <b>dev</b> only"]},
+  {t:"Evaluate again", d:"dev, then test once", cmd:"python -m pipeline.cli evaluate \\\n  --suite warehouse-prototype-v1 --model pi05_lora_wlb", what:"A <code>mode: finetuned</code> model card names its dataset manifest; the evaluator refuses to run if any evaluated (task, condition, seed) was in the training data.", knobs:["<code>training.dataset_manifest</code> in the model card","<code>--split test --allow-test</code> for the single final run"]},
+];
+const flowEl = document.getElementById("flow"), panelEl = document.getElementById("flow-panel");
+flowEl.innerHTML = FLOW.map((s,i)=>`${i?'<span class="arrow" aria-hidden="true">→</span>':''}<button class="node" role="tab" type="button" data-i="${i}" aria-selected="${i===0}"><span class="t">${i+1}. ${s.t}</span><span class="d">${s.d}</span></button>`).join("");
+function showFlow(i){const s=FLOW[i];flowEl.querySelectorAll(".node").forEach(n=>n.setAttribute("aria-selected", n.dataset.i==i));
+  panelEl.innerHTML=`<div><h3>${s.t}</h3><p>${s.what}</p><p style="margin-top:14px;color:var(--muted);font-size:14px">You can change</p><ul style="margin:0;padding-left:18px;color:var(--ink-2)">${s.knobs.map(k=>`<li>${k}</li>`).join("")}</ul></div><pre><button class="copy">copy</button>${s.cmd.replace(/</g,"&lt;")}</pre>`;}
+flowEl.addEventListener("click", ev=>{const b=ev.target.closest(".node");if(b)showFlow(+b.dataset.i);});
+showFlow(0);
+
+const CMP = [
+  ["Tasks","Themed suites (prototype, industrial), all tasks by default, <code>--tasks</code> to choose","built","LIBERO (4 suites), RoboCasa365 (named suites)","No robot in a suite: it comes from the model card; skipped tasks are listed"],
+  ["Tasks","Bin-to-bin transfer, D0–D2, strict success","frozen","Original warehouse workcell task","Frozen seeds and success rule; results are never re-scored"],
+  ["Tasks","Order picking into an order tote","built","Industrial scenario; RoboBenchMart","Draft task in the warehouse environment"],
+  ["Tasks","Industrial shelf retrieval in a narrow aisle (zero-shot and fine-tuned baselines)","built","Industrial scenario","Draft task with its own train, dev and test seeds"],
+  ["Running","Model as a websocket server; benchmark drives the simulator","built","openpi protocol, as RoboBenchMart's baselines use","One server template for any model"],
+  ["Models","VLAs and world action models through one interface","built","LIBERO, RoboCasa, RoboTwin 2.0 evaluate WAMs as policies; no WAM-specific standard yet","Frame history in, predicted frames saved; same score as VLAs"],
+  ["Modes","Zero-shot / fine-tuned / privileged label on every result","built","RoboBenchMart (released checkpoints), RoboTwin 2.0 (train then test)","Label comes from the model card"],
+  ["Modes","Standard fine-tune recipe: fixed demos, reported budget","built","RoboTwin 2.0 (50 clean demos → Easy/Hard), LIBERO (50 demos per task)","Scripted-oracle demos, 100 per condition"],
+  ["Data","Demos replayed bit for bit, exported to LeRobot or LIBERO HDF5","built","LeRobot and LIBERO formats","Exact replay check before export"],
+  ["Data","Released fine-tuning dataset: the same demonstrations for everyone","planned","LIBERO (50 demos per task), RoboTwin 2.0 (released expert data)","Dataset card with per-file checksums and the seed manifest"],
+  ["Splits","Train / dev / test seeds, test once, leakage refused","built","LIBERO fixes evaluation start states","Checked against the dataset manifest"],
+  ["Execution","How much of each action chunk runs before re-asking","built","UWM (8 of 16), Cosmos Policy (16 of 32 on RoboCasa)","Set per protocol, stated with every result"],
+  ["Success","Declarative success conditions","built","LIBERO's BDDL goal predicates","Parity-checked against the env's own flag (381/381)"],
+  ["Metrics","Partial progress: reached, grasped, lifted, placed","built","VLABench progress score","A funnel rather than one number; tasks add their own stages"],
+  ["Metrics","95% Wilson intervals on every rate","built","New","Most benchmarks report point estimates"],
+  ["Metrics","Failure label + one-sentence reason per episode","built","New","Worded per robot (gripper / suction)"],
+  ["Metrics","Robustness per variation axis","built","LIBERO-Plus per-perturbation report","One condition per variation file"],
+  ["Metrics","Predicted-frame quality for world action models","notyet","World-model benchmarks score video separately","Frames already saved next to the real ones"],
+  ["Metrics","Cycle time per pick, collisions, drops","notyet","Industrial scenario","—"],
+  ["Variation","Distractors / clutter","built","RoboTwin 2.0, VLABench","Never the target's class; spacing is an axis"],
+  ["Variation","Lighting: intensity, colour temperature, ambient","built","RoboTwin 2.0, LIBERO-Plus","—"],
+  ["Variation","SKU class, size, mass, friction","built","Industrial classes A–D (≈200×200×80 mm, ≤0.7 kg); RoboTwin 2.0 / VLABench object libraries","Physics, not only appearance"],
+  ["Variation","Placement jitter, robot start noise","built","D1 level; LIBERO-Plus layout and robot-start axes","—"],
+  ["Variation","Shelf level, bay, item family, neighbour spacing (industrial suite)","planned","Industrial scenario; RoboTwin 2.0 table height","Listed per task as planned conditions until the environment builds them"],
+  ["Variation","Camera viewpoint","planned","LIBERO-Plus","—"],
+  ["Variation","Language paraphrase, background texture, sensor noise","notyet","LIBERO-Plus, RoboTwin 2.0","—"],
+  ["Variation","Scene drawn from the seed, saved, exact replay","built","New","—"],
+  ["Robots","Several robots, each a profile checked against the simulator","built","RoboTwin 2.0 (5 arms), VLABench","Fetch and Panda; a seven-step checklist to add one"],
+  ["Robots","Standard 7-D end-effector action, per-robot converters","built","LIBERO / Open X-Embodiment 7-D delta actions","—"],
+  ["Robots","End-effector type and graspability warning","built","Industrial scenario (tooling question)","—"],
+  ["Tasks","Memory / order lines (“pick 3 of X”)","notyet","RMBench; industrial order lines","—"],
+  ["Tasks","Long-horizon composite tasks","notyet","LIBERO-Long, RoboCasa365 composite","—"],
+];
+const ST = {built:"built",frozen:"frozen",planned:"planned",notyet:"not yet"};
+const cmpF = document.getElementById("cmp-filters"), cmpB = document.querySelector("#cmp-table tbody");
+cmpF.innerHTML = [["all","All"],...Object.entries(ST)].map(([k,l],i)=>`<button type="button" data-f="${k}" aria-pressed="${i===0}">${l[0].toUpperCase()+l.slice(1)}</button>`).join("");
+cmpB.innerHTML = CMP.map(([a,s,st,o,d])=>`<tr data-st="${st}"><td>${a}</td><td>${s}</td><td><span class="st ${st}">${ST[st]}</span></td><td>${o}</td><td>${d}</td></tr>`).join("");
+cmpF.addEventListener("click", ev=>{const b=ev.target.closest("button");if(!b)return;
+  cmpF.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed", x===b));
+  cmpB.querySelectorAll("tr").forEach(r=>r.style.display=b.dataset.f==="all"||r.dataset.st===b.dataset.f?"":"none");});
+
+const zoom=document.getElementById("zoom"), zBody=document.getElementById("zoom-body"), zCap=document.getElementById("zoom-cap");
+document.addEventListener("click", ev=>{const m=ev.target.closest(".clip video,.clip img,.still img,.robot .views img");if(!m||ev.target.closest("dialog"))return;
+  ev.preventDefault();
+  zBody.innerHTML = m.tagName==="VIDEO"?`<video src="${m.getAttribute("src")}" autoplay muted loop playsinline controls></video>`:`<img src="${m.getAttribute("src")}" alt="${m.alt||""}">`;
+  const cap=m.closest("figure,.still,.robot");zCap.textContent=cap?cap.innerText.replace(/\s+/g," ").trim():"";
+  zoom.showModal();});
+document.getElementById("zoom-close").addEventListener("click",()=>zoom.close());
+zoom.addEventListener("click",ev=>{if(ev.target===zoom)zoom.close();});
+zoom.addEventListener("close",()=>{zBody.innerHTML="";});
+
+document.addEventListener("click", ev=>{const b=ev.target.closest(".copy");if(!b)return;
+  const text=b.parentElement.innerText.replace(/^copy\n?/,"").replace(/^#.*\n/gm,"").trim();
+  const done=()=>{b.textContent="copied";setTimeout(()=>b.textContent="copy",1200);};
+  try{navigator.clipboard.writeText(text).then(done,done);}catch(e){done();}});
+
+const root=document.documentElement, KEY="wlb-theme";
+try{const saved=localStorage.getItem(KEY);if(saved)root.dataset.theme=saved;}catch(e){}
+document.getElementById("theme").addEventListener("click",()=>{const dark=root.dataset.theme?root.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme=dark?"light":"dark";try{localStorage.setItem(KEY,root.dataset.theme);}catch(e){}});
+const io=new IntersectionObserver(es=>es.forEach(e=>{const v=e.target;if(e.isIntersecting){v.play&&v.play().catch(()=>{});}else{v.pause&&v.pause();}}),{threshold:.4});
+document.querySelectorAll("video").forEach(v=>io.observe(v));
+</script>
+</body>
+</html>
